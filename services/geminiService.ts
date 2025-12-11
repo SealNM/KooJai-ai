@@ -67,11 +67,12 @@ export class GeminiService {
   private onVolumeUpdate: (volume: number, isUser: boolean) => void;
 
   constructor(
+    apiKey: string,
     onTranscriptUpdate: (text: string, isUser: boolean) => void,
     onVolumeUpdate: (volume: number, isUser: boolean) => void
   ) {
-    // Initialize GoogleGenAI with API Key from environment
-    this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    // Initialize GoogleGenAI with provided API Key
+    this.ai = new GoogleGenAI({ apiKey: apiKey });
     this.onTranscriptUpdate = onTranscriptUpdate;
     this.onVolumeUpdate = onVolumeUpdate;
   }

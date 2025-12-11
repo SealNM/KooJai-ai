@@ -54,10 +54,18 @@ const TeacherIcon = () => (
   </svg>
 );
 
+const SettingsIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+    <circle cx="12" cy="12" r="3"/>
+  </svg>
+);
+
 const App: React.FC = () => {
   // Application State
+  const [apiKey, setApiKey] = useState<string | null>(null);
   const [studentId, setStudentId] = useState<string>('');
-  const [step, setStep] = useState<'login' | 'mood' | 'chat'>('login');
+  const [step, setStep] = useState<'apikey' | 'login' | 'mood' | 'chat'>('apikey');
   
   // Data State
   const [lastMemory, setLastMemory] = useState<string>('');
@@ -80,11 +88,26 @@ const App: React.FC = () => {
   const geminiServiceRef = useRef<GeminiService | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Initialize DB and Service
+  // Initialize DB and Check for API Key
   useEffect(() => {
     initDB().catch(e => console.error("DB Init failed", e));
     
+    // Check Local Storage for Key
+    const storedKey = localStorage.getItem('gemini_api_key');
+    if (storedKey) {
+      setApiKey(storedKey);
+      setStep('login');
+    } else {
+      setStep('apikey');
+    }
+  }, []);
+
+  // Initialize Service when API Key is available
+  useEffect(() => {
+    if (!apiKey) return;
+
     geminiServiceRef.current = new GeminiService(
+      apiKey,
       (text, isUser) => {
         if (!text) return; // Prevent empty updates
 
@@ -109,7 +132,7 @@ const App: React.FC = () => {
           setSpeakerSource(isUser ? 'user' : 'ai');
       }
     );
-  }, []);
+  }, [apiKey]);
 
   // Auto-scroll transcript
   useEffect(() => {
@@ -126,6 +149,26 @@ const App: React.FC = () => {
     }, 50);
     return () => clearInterval(interval);
   }, [isLive]);
+
+  const handleApiKeySubmit = (e: React.FormEvent, key: string) => {
+    e.preventDefault();
+    if (key.trim().length > 10) {
+      localStorage.setItem('gemini_api_key', key.trim());
+      setApiKey(key.trim());
+      setStep('login');
+    } else {
+      alert("กรุณากรอก API Key ที่ถูกต้อง");
+    }
+  };
+
+  const resetApiKey = () => {
+    if(confirm("ต้องการเปลี่ยน API Key ใช่หรือไม่?")) {
+      localStorage.removeItem('gemini_api_key');
+      setApiKey(null);
+      setStep('apikey');
+      setStudentId('');
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -167,7 +210,7 @@ const App: React.FC = () => {
     } catch (error) {
       console.error("Failed to start session:", error);
       setIsConnecting(false);
-      alert("ขออภัย ไม่สามารถเชื่อมต่อระบบได้ กรุณาลองใหม่");
+      alert("ขออภัย ไม่สามารถเชื่อมต่อระบบได้ กรุณาลองใหม่ หรือตรวจสอบ API Key");
     }
   };
 
@@ -209,12 +252,73 @@ const App: React.FC = () => {
 
   // --- Screens ---
 
+  const renderApiKeyInput = () => {
+    const [inputKey, setInputKey] = useState('');
+    
+    return (
+      <div className="h-screen w-screen flex items-center justify-center p-6 bg-slate-50 relative overflow-hidden animate-fade-in">
+        <div className="bg-white p-10 rounded-3xl shadow-2xl w-full max-w-md text-center z-10 border border-slate-100">
+          <div className="mb-6 flex justify-center">
+            <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center">
+               <span className="text-3xl">🔑</span>
+            </div>
+          </div>
+          <h1 className="text-2xl font-bold text-slate-800 mb-2">ตั้งค่า API Key</h1>
+          <p className="text-slate-500 mb-6 font-light text-sm">
+            โปรดใส่ Gemini API Key เพื่อเริ่มต้นใช้งาน<br/>
+            (ข้อมูลจะถูกเก็บในเครื่องของคุณเท่านั้น)
+          </p>
+          
+          <form onSubmit={(e) => handleApiKeySubmit(e, inputKey)} className="space-y-4">
+            <input
+              type="password"
+              placeholder="Paste your API Key here"
+              className="w-full px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 focus:outline-none transition-all text-center text-sm"
+              value={inputKey}
+              onChange={(e) => setInputKey(e.target.value)}
+              required
+            />
+            <button
+              type="submit"
+              className="w-full bg-slate-800 hover:bg-slate-900 text-white text-lg font-semibold py-4 rounded-2xl transition duration-200 shadow-lg btn-press"
+            >
+              บันทึกและใช้งาน
+            </button>
+          </form>
+
+          <div className="mt-8 pt-6 border-t border-slate-100">
+            <p className="text-xs text-slate-400 mb-2">ยังไม่มี API Key ใช่ไหม?</p>
+            <a 
+              href="https://aistudio.google.com/app/apikey" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-blue-500 text-sm font-medium hover:underline flex items-center justify-center gap-1"
+            >
+              รับ API Key จาก Google AI Studio ↗
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderLogin = () => (
-    <div className="h-screen w-screen flex items-center justify-center p-6 bg-slate-50 relative overflow-hidden">
+    <div className="h-screen w-screen flex items-center justify-center p-6 bg-slate-50 relative overflow-hidden animate-fade-in">
+      {/* Background Decor */}
       <div className="absolute top-0 right-0 w-96 h-96 bg-blue-100 rounded-full opacity-30 blur-3xl translate-x-1/2 -translate-y-1/2"></div>
       <div className="absolute bottom-0 left-0 w-80 h-80 bg-blue-100 rounded-full opacity-30 blur-3xl -translate-x-1/3 translate-y-1/3"></div>
 
       <div className="bg-white p-10 rounded-3xl shadow-2xl w-full max-w-md text-center animate-slide-up relative z-10 border border-slate-100">
+        
+        {/* Reset Key Button */}
+        <button 
+          onClick={resetApiKey}
+          className="absolute top-6 right-6 text-slate-300 hover:text-slate-500 transition-colors"
+          title="Change API Key"
+        >
+          <SettingsIcon />
+        </button>
+
         <div className="mb-6 flex justify-center">
           <div className="w-32 h-32 bg-blue-500 rounded-full flex items-center justify-center shadow-lg shadow-blue-200 p-6">
              <HeartIcon />
@@ -486,6 +590,7 @@ const App: React.FC = () => {
 
   return (
     <>
+      {step === 'apikey' && renderApiKeyInput()}
       {step === 'login' && renderLogin()}
       {step === 'mood' && renderMoodCheckin()}
       {step === 'chat' && renderActiveSession()}

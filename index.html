@@ -76,6 +76,21 @@
   }
 }
 </script>
+<script>
+    window.onerror = function(message, source, lineno, colno, error) {
+      const root = document.getElementById('root');
+      if (root) {
+        root.innerHTML = `
+          <div style="padding: 20px; font-family: monospace; color: red;">
+            <h2>Oops! Something went wrong.</h2>
+            <p><strong>Error:</strong> ${message}</p>
+            <p><strong>Source:</strong> ${source}:${lineno}:${colno}</p>
+          </div>
+        `;
+      }
+      return false; 
+    };
+  </script>
 </head>
   <body class="text-slate-800">
     <div id="root"></div>
