@@ -1,0 +1,7 @@
+{
+  "name": "KooJai (คู่ใจ) - AI Listening Friend 2",
+  "description": "An empathetic AI listening companion for students that analyzes conversations for safety risks.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
