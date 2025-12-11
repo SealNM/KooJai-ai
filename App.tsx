@@ -64,6 +64,7 @@ const SettingsIcon = () => (
 const App: React.FC = () => {
   // Application State
   const [apiKey, setApiKey] = useState<string | null>(null);
+  const [inputKey, setInputKey] = useState<string>('');
   const [studentId, setStudentId] = useState<string>('');
   const [step, setStep] = useState<'apikey' | 'login' | 'mood' | 'chat'>('apikey');
   
@@ -253,8 +254,6 @@ const App: React.FC = () => {
   // --- Screens ---
 
   const renderApiKeyInput = () => {
-    const [inputKey, setInputKey] = useState('');
-    
     return (
       <div className="h-screen w-screen flex items-center justify-center p-6 bg-slate-50 relative overflow-hidden animate-fade-in">
         <div className="bg-white p-10 rounded-3xl shadow-2xl w-full max-w-md text-center z-10 border border-slate-100">
