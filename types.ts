@@ -1,31 +1,42 @@
+/**
+ * 📘 Types & Interfaces
+ * ไฟล์นี้เหมือน "พจนานุกรม" ที่บอกว่าข้อมูลแต่ละก้อนหน้าตาเป็นยังไง
+ * ข้อดีของ TypeScript คือถ้าเราส่งข้อมูลผิดรูปแบบ โปรแกรมจะเตือนทันที (ไม่ต้องรอรันแล้วพัง)
+ */
+
+// Enum: ใช้เมื่อค่าที่เป็นไปได้มีจำกัด (เช่น ระดับความรุนแรง)
 export enum SeverityLevel {
-  NONE = 'NONE',
-  LOW = 'LOW',
-  MEDIUM = 'MEDIUM',
-  HIGH = 'HIGH',
-  CRITICAL = 'CRITICAL'
+  NONE = 'NONE',         // ปกติ
+  LOW = 'LOW',           // ต่ำ
+  MEDIUM = 'MEDIUM',     // ปานกลาง
+  HIGH = 'HIGH',         // สูง (อันตราย)
+  CRITICAL = 'CRITICAL'  // วิกฤต (ต้องรีบช่วย)
 }
 
+// Interface: แบบแปลนของ Object (TeacherReport)
 export interface TeacherReport {
   student_id: string;
   severity_level: SeverityLevel;
-  problem_category: string[];
-  summary_for_teacher: string;
-  recommendation_for_teacher: string;
-  should_notify_teacher: boolean;
-  // New features
-  memory_for_next_session: string; // Context for the AI to remember
-  healing_quote: string; // Encouraging message for the student
+  problem_category: string[];        // หมวดหมู่ปัญหา เช่น ['การเรียน', 'เพื่อน']
+  summary_for_teacher: string;       // สรุปสั้นๆ ให้ครูอ่าน
+  recommendation_for_teacher: string; // คำแนะนำว่าครูควรทำไง
+  should_notify_teacher: boolean;    // แจ้งเตือนครูไหม?
+  
+  // ฟีเจอร์ใหม่
+  memory_for_next_session: string;   // สิ่งที่ AI ควรจำไว้ทักทายครั้งหน้า
+  healing_quote: string;             // คำคมฮีลใจสำหรับนักเรียน
 }
 
+// แบบแปลนข้อความแชท
 export interface ChatMessage {
-  role: 'user' | 'model';
+  role: 'user' | 'model'; // ใครพูด? (คน หรือ AI)
   text: string;
-  timestamp: number;
+  timestamp: number;      // เวลาที่พูด (ใช้ Date.now())
 }
 
+// แบบแปลนบันทึกอารมณ์
 export interface MoodEntry {
-  id?: number;
+  id?: number;            // ID ใน Database (ใส่ ? แปลว่าอาจจะไม่มีก็ได้ ตอนยังไม่บันทึก)
   student_id: string;
   mood: 'happy' | 'neutral' | 'sad' | 'angry' | 'tired';
   timestamp: number;

@@ -1,74 +1,82 @@
 import React, { useEffect, useRef } from 'react';
 
+/**
+ * 🎨 Visualizer Component
+ * หน้าที่: วาดกราฟิกวงกลมเต้นตามเสียง
+ * เทคนิค: ใช้ HTML5 Canvas API + requestAnimationFrame
+ */
+
 interface VisualizerProps {
-  isActive: boolean;
-  volume: number; // 0.0 to 1.0
-  source: 'user' | 'ai';
+  isActive: boolean; // กำลังคุยอยู่ไหม
+  volume: number;    // ความดัง (0.0 ถึง 1.0)
+  source: 'user' | 'ai'; // ใครพูด
 }
 
 const Visualizer: React.FC<VisualizerProps> = ({ isActive, volume, source }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const requestRef = useRef<number>();
+  const canvasRef = useRef<HTMLCanvasElement>(null); // อ้างอิงถึง <canvas> ใน DOM
+  const requestRef = useRef<number>(); // เก็บ ID ของ Animation Frame
   
-  // Smooth out the volume
-  const smoothVolRef = useRef(0);
-  const phaseRef = useRef(0);
+  // ตัวแปรสำหรับ Animation ที่ต้องการความต่อเนื่อง
+  const smoothVolRef = useRef(0); // ค่าความดังที่ผ่านการเกลี่ยให้นุ่มนวล (Smooth)
+  const phaseRef = useRef(0);     // เฟสของคลื่น (Sine Wave Phase)
 
+  // ฟังก์ชันวาด (ทำงานซ้ำๆ 60 ครั้งต่อวินาที)
   const animate = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Time step for subtle idle movement
+    // 1. เพิ่ม Phase (เพื่อให้วงกลมขยับดุ๊กดิ๊กแม้ไม่มีเสียง)
     phaseRef.current += 0.02;
     
-    // Decay logic
+    // 2. คำนวณความนุ่มนวล (Linear Interpolation)
+    // ถ้าเสียงดังขึ้น ให้พุ่งขึ้นเร็ว (Attack)
+    // ถ้าเสียงเบาลง ให้ค่อยๆ ลด (Decay)
     if (volume > smoothVolRef.current) {
-        smoothVolRef.current += (volume - smoothVolRef.current) * 0.2; // Attack
+        smoothVolRef.current += (volume - smoothVolRef.current) * 0.2; 
     } else {
-        smoothVolRef.current += (volume - smoothVolRef.current) * 0.05; // Decay
+        smoothVolRef.current += (volume - smoothVolRef.current) * 0.05; 
     }
 
     const currentVol = smoothVolRef.current;
+    
+    // เตรียมพื้นที่วาด
     const width = canvas.width;
     const height = canvas.height;
     const centerX = width / 2;
     const centerY = height / 2;
 
-    ctx.clearRect(0, 0, width, height);
+    ctx.clearRect(0, 0, width, height); // ล้างภาพเก่า
 
+    // กรณี Idle (ไม่ได้คุย): วาดจุดหายใจเบาๆ
     if (!isActive) {
-      // Idle state: Small breathing dot
       const breathingRadius = 50 + Math.sin(phaseRef.current * 2) * 2;
       ctx.beginPath();
       ctx.arc(centerX, centerY, breathingRadius, 0, 2 * Math.PI);
-      ctx.fillStyle = '#F1F5F9'; // Slate-100
+      ctx.fillStyle = '#F1F5F9'; // สีเทาอ่อน
       ctx.fill();
-      requestRef.current = requestAnimationFrame(animate);
+      requestRef.current = requestAnimationFrame(animate); // เรียกตัวเองซ้ำ
       return;
     }
 
-    // Distinct Colors
-    // User: Deep Blue (#2563EB - Blue 600)
-    // AI: Pink (#EC4899 - Pink 500)
+    // กรณี Active: เลือกสีตามคนพูด
+    // User: สีฟ้า (#2563EB)
+    // AI: สีชมพู (#EC4899)
     const color = source === 'user' 
-        ? '37, 99, 235'   // Deep Blue
-        : '236, 72, 153'; // Pink
+        ? '37, 99, 235'   
+        : '236, 72, 153'; 
 
-    // Draw concentric pulses (No walking wave)
-    // Using 3 layers of opacity
+    // วาดวงกลม 3 ชั้นซ้อนกัน (Ripples)
     const layers = 3;
-    const maxRadius = 180; // Max size of expansion
+    const maxRadius = 180; // ขนาดขยายสูงสุด
 
     for (let i = 0; i < layers; i++) {
-        // Each layer is slightly larger and more transparent
-        // The volume drives the scale directly
+        // คำนวณขนาด: ฐาน + ขยายตามเสียง + ขยับตาม Sine Wave
         const layerVol = Math.max(0, currentVol - (i * 0.1));
-        
-        // Base radius + Volume expansion + Subtle breathing
         const r = 80 + (i * 20) + (layerVol * maxRadius) + (Math.sin(phaseRef.current + i) * 5);
         
+        // ยิ่งวงนอก ยิ่งจาง
         const opacity = 0.6 - (i * 0.2); 
         
         ctx.beginPath();
@@ -77,18 +85,21 @@ const Visualizer: React.FC<VisualizerProps> = ({ isActive, volume, source }) => 
         ctx.fill();
     }
     
-    // Inner core (solid)
+    // วงกลมตรงกลาง (แกน)
     ctx.beginPath();
     ctx.arc(centerX, centerY, 60 + (currentVol * 20), 0, 2 * Math.PI);
     ctx.fillStyle = `rgb(${color})`;
     ctx.fill();
 
+    // Loop ต่อไป
     requestRef.current = requestAnimationFrame(animate);
   };
 
+  // เรียกใช้ Animation เมื่อ Component โหลด
   useEffect(() => {
     requestRef.current = requestAnimationFrame(animate);
     return () => {
+      // เมื่อ Component หายไป ให้หยุดวาด (ป้องกัน Memory Leak)
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
     };
   }, [isActive, volume, source]);

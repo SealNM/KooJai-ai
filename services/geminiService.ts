@@ -2,11 +2,15 @@ import { GoogleGenAI, LiveServerMessage, Modality, Type } from "@google/genai";
 import { createPcmBlob, base64ToUint8Array, decodeAudioData } from "../utils/audioUtils";
 import { TeacherReport, SeverityLevel } from "../types";
 
-// --- Configuration Constants ---
+// --- ⚙️ ส่วนตั้งค่า (Configuration) ---
 
+// ชื่อโมเดลที่ใช้
+// 1. LIVE_MODEL: โมเดลคุยสด (เร็ว, รองรับเสียงโดยตรง)
 const LIVE_MODEL = 'gemini-2.5-flash-native-audio-preview-09-2025';
+// 2. ANALYSIS_MODEL: โมเดลวิเคราะห์ (ฉลาด, รองรับ JSON)
 const ANALYSIS_MODEL = 'gemini-2.5-flash';
 
+// คำสั่งเข้าระบบ (Prompt) สำหรับบทบาทของ AI
 const STUDENT_SYSTEM_INSTRUCTION_TEMPLATE = `
 บทบาท: คุณคือ "KooJai" (คู่ใจ) เพื่อนพี่กระต่ายที่อบอุ่นและใจดี
 คู่สนทนา: นักเรียนไทย (วัยรุ่น)
@@ -47,43 +51,47 @@ const ANALYSIS_SYSTEM_INSTRUCTION = `
 ถ้า severity_level เป็น HIGH หรือ CRITICAL ให้ should_notify_teacher = true มิฉะนั้นเป็น false
 `;
 
-// --- Service Implementation ---
+// --- 🔧 Service Implementation ---
+// Class นี้ทำหน้าที่จัดการ "เสียง" และ "การเชื่อมต่อกับ AI" ทั้งหมด
 
 export class GeminiService {
   private ai: GoogleGenAI;
-  private inputAudioContext: AudioContext | null = null;
-  private outputAudioContext: AudioContext | null = null;
-  private mediaStream: MediaStream | null = null;
+  // AudioContext คือตัวจัดการเสียงของ Browser
+  private inputAudioContext: AudioContext | null = null;  // ขาเข้า (ไมค์)
+  private outputAudioContext: AudioContext | null = null; // ขาออก (ลำโพง)
+  private mediaStream: MediaStream | null = null; // สายสัญญาณเสียงจากไมค์
   private inputNode: GainNode | null = null;
   private outputNode: GainNode | null = null;
-  private sources: Set<AudioBufferSourceNode> = new Set();
-  private nextStartTime: number = 0;
+  private sources: Set<AudioBufferSourceNode> = new Set(); // เก็บเสียงที่กำลังเล่นอยู่
+  private nextStartTime: number = 0; // ตัวนับเวลาเพื่อให้เสียงเล่นต่อกันไม่สะดุด
   
-  // Active Session Reference
+  // เก็บ Session ปัจจุบันที่กำลังคุยอยู่
   private currentSession: any = null;
   
-  // Callbacks for UI updates
+  // ฟังก์ชัน Callback เพื่อส่งข้อมูลกลับไปหน้า UI
   private onTranscriptUpdate: (text: string, isUser: boolean) => void;
   private onVolumeUpdate: (volume: number, isUser: boolean) => void;
 
   constructor(
-    apiKey: string,
     onTranscriptUpdate: (text: string, isUser: boolean) => void,
     onVolumeUpdate: (volume: number, isUser: boolean) => void
   ) {
-    // Initialize GoogleGenAI with provided API Key
-    this.ai = new GoogleGenAI({ apiKey: apiKey });
+    // เริ่มต้น SDK
+    // @ts-ignore: process.env.API_KEY is assumed to be available
+    this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     this.onTranscriptUpdate = onTranscriptUpdate;
     this.onVolumeUpdate = onVolumeUpdate;
   }
 
+  // --- เริ่มการสนทนา (Start) ---
   async startLiveSession(previousContext: string = "") {
-    // 1. Reset state
+    // 1. ล้างค่าเก่าก่อน
     await this.stopLiveSession();
     this.nextStartTime = 0;
     this.sources.clear();
 
-    // 2. Setup Audio Contexts (Lazy Init & Reuse)
+    // 2. สร้าง Audio Contexts (ถ้ายังไม่มี)
+    // AudioContext ต้องสร้างใหม่หรือ Resume หลัง user interaction (กดปุ่ม) ไม่งั้น Browser จะบล็อกเสียง
     if (!this.inputAudioContext) {
       this.inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
     }
@@ -91,35 +99,37 @@ export class GeminiService {
       this.outputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
     }
 
-    // Always resume contexts (fixes iOS/Safari and resumption issues)
+    // ปลุกให้ตื่น (Resume) เผื่อมันหลับ (Suspended)
     if (this.inputAudioContext.state === 'suspended') await this.inputAudioContext.resume();
     if (this.outputAudioContext.state === 'suspended') await this.outputAudioContext.resume();
 
-    // Recreate nodes to be safe
+    // สร้าง Node ปรับเสียง
     this.inputNode = this.inputAudioContext.createGain();
     this.outputNode = this.outputAudioContext.createGain();
-    this.outputNode.connect(this.outputAudioContext.destination);
+    this.outputNode.connect(this.outputAudioContext.destination); // ต่อลำโพง
 
-    // Get Microphone Stream
+    // ขออนุญาตใช้ไมค์
     this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     
-    // Prepare System Instruction with Memory
+    // ใส่ความจำเก่าลงไปใน Prompt
     const finalInstruction = STUDENT_SYSTEM_INSTRUCTION_TEMPLATE.replace(
       '{{MEMORY_CONTEXT}}', 
       previousContext || "ไม่มีข้อมูลเก่า (เพิ่งเจอกันครั้งแรก หรือคุยเรื่องใหม่ได้เลย)"
     );
 
-    // Connect to Gemini Live
+    // 3. เชื่อมต่อ WebSocket กับ Gemini
     this.currentSession = await this.ai.live.connect({
       model: LIVE_MODEL,
       callbacks: {
         onopen: () => {
           console.log("Gemini Live Connected");
           if (this.mediaStream) {
+            // พอต่อติดปุ๊บ เริ่มส่งเสียงไมค์ไปปั๊บ
             this.handleAudioInput(this.mediaStream);
           }
         },
         onmessage: async (message: LiveServerMessage) => {
+          // พอมีข้อความตอบกลับ ให้จัดการ
           this.handleServerMessage(message);
         },
         onerror: (e: ErrorEvent) => {
@@ -130,42 +140,43 @@ export class GeminiService {
         },
       },
       config: {
-        responseModalities: [Modality.AUDIO],
+        responseModalities: [Modality.AUDIO], // ขอคำตอบเป็นเสียง
         speechConfig: {
-          voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } }, // Kore is gentle
+          voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } }, // เสียง Kore (นุ่มนวล)
         },
-        // Wrap system instruction in proper Content object structure
         systemInstruction: { parts: [{ text: finalInstruction }] },
-        // Set as empty objects to enable transcription correctly
+        // เปิดระบบแปลงเสียงเป็นตัวหนังสือ (Transcription) ทั้งขาเข้าและออก
         inputAudioTranscription: {}, 
         outputAudioTranscription: {}, 
       },
     });
   }
 
+  // --- จัดการไมโครโฟน (Input) ---
   private handleAudioInput(stream: MediaStream) {
     if (!this.inputAudioContext) return;
 
+    // แปลง Stream จากไมค์เป็นข้อมูลดิจิตอล
     const source = this.inputAudioContext.createMediaStreamSource(stream);
     const scriptProcessor = this.inputAudioContext.createScriptProcessor(4096, 1, 1);
     
+    // ฟังก์ชันนี้จะถูกเรียกซ้ำๆ ทุกๆ เสี้ยววินาที เมื่อมีเสียงเข้ามา
     scriptProcessor.onaudioprocess = (audioProcessingEvent) => {
-      // If session is closed, stop processing
       if (!this.currentSession) return;
 
-      const inputData = audioProcessingEvent.inputBuffer.getChannelData(0);
+      const inputData = audioProcessingEvent.inputBuffer.getChannelData(0); // ข้อมูลเสียงดิบ (PCM)
       
-      // Calculate volume for visualizer (RMS)
+      // คำนวณความดัง (RMS) เพื่อเอาไปทำ Visualizer
       let sum = 0;
       for (let i = 0; i < inputData.length; i++) {
         sum += inputData[i] * inputData[i];
       }
       const rms = Math.sqrt(sum / inputData.length);
-      const boostedVolume = Math.min(1, rms * 10); 
+      const boostedVolume = Math.min(1, rms * 10); // คูณ 10 ให้กราฟิกขยับชัดๆ
       
       this.onVolumeUpdate(boostedVolume, true); // true = User speaking
 
-      // Send to Gemini using the Active Session
+      // แปลงข้อมูลเสียงส่งไปให้ AI
       const pcmBlob = createPcmBlob(inputData);
       try {
           this.currentSession.sendRealtimeInput({ media: pcmBlob });
@@ -178,14 +189,15 @@ export class GeminiService {
     scriptProcessor.connect(this.inputAudioContext.destination);
   }
 
+  // --- จัดการเสียงตอบกลับ (Output) ---
   private async handleServerMessage(message: LiveServerMessage) {
-    // 1. Handle Audio Output
+    // 1. ถ้ามีข้อมูลเสียงส่งมา (AI พูด)
     const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
     if (base64Audio && this.outputAudioContext && this.outputNode) {
-        this.onVolumeUpdate(0.5, false); // false = AI speaking
+        this.onVolumeUpdate(0.5, false); // ขยับ Visualizer ฝั่ง AI
         
-        // Ensure we schedule audio to play AFTER the current time
-        // We sync nextStartTime to currentTime if it fell behind (e.g. silence gaps)
+        // เทคนิคการเล่นเสียงให้ต่อเนื่อง (Buffering)
+        // ถ้าเวลาปัจจุบันเลยเวลาที่กำหนดไว้ ให้รีเซ็ตเวลาใหม่ (กันเสียงขาด)
         if (this.nextStartTime < this.outputAudioContext.currentTime) {
              this.nextStartTime = this.outputAudioContext.currentTime;
         }
@@ -193,20 +205,23 @@ export class GeminiService {
         const audioBytes = base64ToUint8Array(base64Audio);
         const audioBuffer = await decodeAudioData(audioBytes, this.outputAudioContext, 24000, 1);
         
+        // สร้าง Source เพื่อเล่นเสียง
         const source = this.outputAudioContext.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(this.outputNode);
         source.addEventListener('ended', () => {
-            this.sources.delete(source);
+            this.sources.delete(source); // เล่นจบแล้วลบทิ้ง
         });
         
+        // เล่นเสียงต่อจากเสียงที่แล้ว (Queuing)
         source.start(this.nextStartTime);
         this.nextStartTime += audioBuffer.duration;
         this.sources.add(source);
     }
 
-    // 2. Handle Interruption
+    // 2. ถ้า AI โดนขัดจังหวะ (Interruption) เช่น User พูดแทรก
     if (message.serverContent?.interrupted) {
+      // หยุดเสียงทั้งหมดทันที
       this.sources.forEach(src => {
         try { src.stop(); } catch(e) {}
       });
@@ -216,43 +231,40 @@ export class GeminiService {
       }
     }
 
-    // 3. Handle Transcriptions (User & Model)
-    // We strictly use outputTranscription to avoid thinking blocks
+    // 3. จัดการข้อความตัวหนังสือ (Transcript)
+    
+    // สิ่งที่ AI พูด
     const outputTranscript = message.serverContent?.outputTranscription?.text;
     if (outputTranscript) {
-         // Strict Clean: Remove everything before the first Thai character
+         // (Cleanup Code) ลบอักขระแปลกปลอม เอาเฉพาะภาษาไทย
          const thaiMatch = outputTranscript.match(/[\u0E00-\u0E7F]/);
          if (thaiMatch && thaiMatch.index !== undefined) {
              const cleanText = outputTranscript.substring(thaiMatch.index);
-             const superCleanText = cleanText.replace(/\*\*.*?\*\*/g, "").trim();
+             const superCleanText = cleanText.replace(/\*\*.*?\*\*/g, "").trim(); // ลบ Markdown
              if (superCleanText) {
                  this.onTranscriptUpdate(superCleanText, false);
              }
          }
     }
 
-    // User input transcription
+    // สิ่งที่ User พูด
     const inputTranscript = message.serverContent?.inputTranscription?.text;
     if (inputTranscript) {
         this.onTranscriptUpdate(inputTranscript, true);
     }
   }
 
+  // --- หยุดการสนทนา ---
   async stopLiveSession() {
-    // 1. Close the Gemini Session properly implies stop processing
     this.currentSession = null;
 
-    // 2. Stop Microphone Tracks (Hardware Light off)
+    // ปิดไมค์ (ไฟสีแดงดับ)
     if (this.mediaStream) {
         this.mediaStream.getTracks().forEach(track => track.stop());
         this.mediaStream = null;
     }
 
-    // 3. Do NOT close Audio Contexts, just stop sources
-    // This allows us to reuse the context in the next session without creating new ones
-    // which prevents the "silent second run" bug.
-    
-    // Stop all playing sources
+    // หยุดเสียงที่กำลังเล่นอยู่
     this.sources.forEach(s => {
       try { s.stop(); } catch (e) {}
     });
@@ -261,8 +273,8 @@ export class GeminiService {
     this.nextStartTime = 0;
   }
 
-  // --- Analysis Method ---
-
+  // --- ฟังก์ชันวิเคราะห์ (ใช้ Text Model) ---
+  // แยกออกมาไม่เกี่ยวกับ Live API
   async analyzeConversation(studentId: string, conversationLog: string): Promise<TeacherReport> {
     const prompt = `
     Student ID: ${studentId}
@@ -278,7 +290,7 @@ export class GeminiService {
       contents: prompt,
       config: {
         systemInstruction: ANALYSIS_SYSTEM_INSTRUCTION,
-        responseMimeType: "application/json",
+        responseMimeType: "application/json", // บังคับให้ตอบเป็น JSON
         responseSchema: {
           type: Type.OBJECT,
           properties: {

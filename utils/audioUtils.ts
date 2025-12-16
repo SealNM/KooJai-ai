@@ -1,7 +1,15 @@
 import { Blob } from '@google/genai';
 
+/**
+ * 🎧 Audio Utilities
+ * ไฟล์นี้ทำหน้าที่ "ล่ามแปลภาษา" ระหว่าง Browser และ AI
+ * เพราะคอมพิวเตอร์คุยกันด้วยตัวเลข (Binary/Bytes) แต่การส่งผ่านเน็ตบางทีต้องแปลงเป็นข้อความ (Base64)
+ */
+
+// ฟังก์ชัน 1: แปลง Base64 (ข้อความมั่วๆ) -> เป็นตัวเลขไบนารี (Uint8Array)
+// ใช้ตอน: รับเสียงตอบกลับจาก AI มาเล่น
 export function base64ToUint8Array(base64: string): Uint8Array {
-  const binaryString = atob(base64);
+  const binaryString = atob(base64); // atob คือฟังก์ชันมาตรฐานถอดรหัส Base64
   const len = binaryString.length;
   const bytes = new Uint8Array(len);
   for (let i = 0; i < len; i++) {
@@ -10,6 +18,8 @@ export function base64ToUint8Array(base64: string): Uint8Array {
   return bytes;
 }
 
+// ฟังก์ชัน 2: แปลง ArrayBuffer (ตัวเลข) -> เป็น Base64 (ข้อความ)
+// ใช้ตอน: จะส่งไฟล์เสียงไปหา AI (แต่ในโค้ดนี้อาจจะไม่ได้เรียกใช้โดยตรงบ่อยนัก เพราะเราส่ง Blob)
 export function arrayBufferToBase64(buffer: ArrayBuffer): string {
   let binary = '';
   const bytes = new Uint8Array(buffer);
@@ -17,35 +27,46 @@ export function arrayBufferToBase64(buffer: ArrayBuffer): string {
   for (let i = 0; i < len; i++) {
     binary += String.fromCharCode(bytes[i]);
   }
-  return btoa(binary);
+  return btoa(binary); // btoa คือฟังก์ชันเข้ารหัสเป็น Base64
 }
 
+// ฟังก์ชัน 3: สร้าง Blob เสียงแบบ PCM
+// PCM (Pulse Code Modulation) คือข้อมูลเสียงดิบๆ ไม่มีการบีบอัด (เหมือนไฟล์ .wav แต่ไม่มีหัวไฟล์)
+// AI ชอบกิน PCM เพราะประมวลผลเร็วสุด
 export function createPcmBlob(data: Float32Array): Blob {
   const l = data.length;
+  // Browser อัดเสียงมาเป็น Float32 (-1.0 ถึง 1.0)
+  // แต่ AI บางทีอยากได้ Int16 (-32768 ถึง 32767) เพื่อประหยัดที่
   const int16 = new Int16Array(l);
   for (let i = 0; i < l; i++) {
-    // Convert Float32 (-1.0 to 1.0) to Int16 (-32768 to 32767)
+    // คูณด้วย 32768 เพื่อขยายสเกล
     int16[i] = data[i] * 32768;
   }
   return {
-    data: arrayBufferToBase64(int16.buffer),
-    mimeType: 'audio/pcm;rate=16000',
+    data: arrayBufferToBase64(int16.buffer), // แปลงเป็น Text ก่อนส่ง
+    mimeType: 'audio/pcm;rate=16000', // บอก AI ว่านี่คือเสียง PCM นะ ความละเอียด 16000Hz
   };
 }
 
+// ฟังก์ชัน 4: แปลงข้อมูลดิบ (PCM Bytes) ให้เป็นเสียงที่เล่นได้ (AudioBuffer)
+// ใช้ตอน: AI ส่งข้อมูลดิบกลับมา เราต้องเอามาใส่เครื่องเล่นเสียงของ Browser
 export async function decodeAudioData(
   data: Uint8Array,
   ctx: AudioContext,
   sampleRate: number = 24000,
   numChannels: number = 1,
 ): Promise<AudioBuffer> {
+  // แปลงกลับเป็น Int16
   const dataInt16 = new Int16Array(data.buffer);
   const frameCount = dataInt16.length / numChannels;
+  
+  // สร้างกระดาษเปล่าสำหรับเขียนคลื่นเสียง (AudioBuffer)
   const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
 
   for (let channel = 0; channel < numChannels; channel++) {
     const channelData = buffer.getChannelData(channel);
     for (let i = 0; i < frameCount; i++) {
+      // หาร 32768.0 เพื่อแปลงกลับเป็น Float (-1.0 ถึง 1.0) ที่ลำโพงเข้าใจ
       channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
     }
   }

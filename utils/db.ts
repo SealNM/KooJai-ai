@@ -1,10 +1,18 @@
 import { TeacherReport, MoodEntry } from '../types';
 
-const DB_NAME = 'KooJaiDB';
-const DB_VERSION = 2; // Upgraded for Moods
-const STORE_REPORTS = 'reports';
-const STORE_MOODS = 'moods';
+/**
+ * 🗄️ Database Utility
+ * เราใช้ "IndexedDB" ซึ่งเป็นฐานข้อมูลที่ฝังอยู่ใน Browser (Chrome, Safari, etc.)
+ * ข้อดี: เก็บข้อมูลได้เยอะกว่า LocalStorage และเก็บแบบ Object ได้
+ * ข้อเสีย: เขียนโค้ดยากกว่า (เป็น Asynchronous Event-based)
+ */
 
+const DB_NAME = 'KooJaiDB';
+const DB_VERSION = 2; // ถ้าแก้โครงสร้าง DB ต้องเพิ่มเลขนี้
+const STORE_REPORTS = 'reports'; // ตารางเก็บรายงาน
+const STORE_MOODS = 'moods';     // ตารางเก็บอารมณ์
+
+// ฟังก์ชันเปิด/สร้างฐานข้อมูล
 export const initDB = (): Promise<void> => {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -14,15 +22,16 @@ export const initDB = (): Promise<void> => {
       reject("Error opening database");
     };
 
+    // ทำงานเมื่อมีการสร้าง DB ครั้งแรก หรือเปลี่ยน Version
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
       
-      // Store 1: Reports
+      // สร้างตาราง reports
       if (!db.objectStoreNames.contains(STORE_REPORTS)) {
         db.createObjectStore(STORE_REPORTS, { keyPath: 'id', autoIncrement: true });
       }
 
-      // Store 2: Moods (New in V2)
+      // สร้างตาราง moods
       if (!db.objectStoreNames.contains(STORE_MOODS)) {
         db.createObjectStore(STORE_MOODS, { keyPath: 'id', autoIncrement: true });
       }
@@ -34,13 +43,14 @@ export const initDB = (): Promise<void> => {
   });
 };
 
+// ฟังก์ชันบันทึกรายงาน
 export const saveReport = (report: TeacherReport): Promise<void> => {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
     request.onsuccess = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
-      const transaction = db.transaction([STORE_REPORTS], 'readwrite');
+      const transaction = db.transaction([STORE_REPORTS], 'readwrite'); // เปิด Transaction
       const store = transaction.objectStore(STORE_REPORTS);
       
       const reportWithTimestamp = {
@@ -48,7 +58,7 @@ export const saveReport = (report: TeacherReport): Promise<void> => {
         createdAt: Date.now()
       };
 
-      const addRequest = store.add(reportWithTimestamp);
+      const addRequest = store.add(reportWithTimestamp); // เพิ่มข้อมูล
 
       addRequest.onsuccess = () => resolve();
       addRequest.onerror = () => reject("Error saving report");
@@ -58,6 +68,7 @@ export const saveReport = (report: TeacherReport): Promise<void> => {
   });
 };
 
+// ฟังก์ชันบันทึกอารมณ์
 export const saveMood = (entry: MoodEntry): Promise<void> => {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -72,6 +83,7 @@ export const saveMood = (entry: MoodEntry): Promise<void> => {
   });
 };
 
+// ฟังก์ชันดึง "ความจำล่าสุด" (Memory) ของนักเรียนคนนั้นๆ
 export const getLastMemory = (studentId: string): Promise<string | null> => {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -79,11 +91,12 @@ export const getLastMemory = (studentId: string): Promise<string | null> => {
       const db = (event.target as IDBOpenDBRequest).result;
       const tx = db.transaction([STORE_REPORTS], 'readonly');
       const store = tx.objectStore(STORE_REPORTS);
-      const getAll = store.getAll();
+      const getAll = store.getAll(); // ดึงมาทั้งหมด (จริงๆ ควรใช้ Index เพื่อประสิทธิภาพถ้าข้อมูลเยอะ)
 
       getAll.onsuccess = () => {
         const reports = getAll.result as (TeacherReport & { createdAt: number })[];
-        // Filter by student and sort by newest
+        
+        // กรองเฉพาะของนักเรียนคนนี้ และเรียงเอาอันล่าสุดขึ้นก่อน
         const studentReports = reports
           .filter(r => r.student_id === studentId)
           .sort((a, b) => b.createdAt - a.createdAt);
